@@ -1,5 +1,6 @@
 import { executeToolFromJson } from '../../tools/registry'
 import { OPENAI_BASE, openaiJson } from '../openai'
+import { acquireAudioSource, type AudioSourceHandle, type AudioSourceKind } from './audio'
 import { createEventHandler } from './events'
 import { buildSessionConfig, type RealtimeMode } from './session'
 
@@ -32,22 +33,27 @@ async function mintClientSecret(
 
 export class RealtimeClient {
   private pc: RTCPeerConnection | null = null
-  private mic: MediaStream | null = null
+  private source: AudioSourceHandle | null = null
   private audioEl: HTMLAudioElement | null = null
 
   constructor(
     private readonly mode: RealtimeMode,
     private readonly callbacks: RealtimeCallbacks,
+    private readonly audioSource: AudioSourceKind = 'microphone',
   ) {}
 
   async connect(apiKey: string, model: string): Promise<void> {
     this.callbacks.onStatus('connecting')
     try {
-      const [secret, mic] = await Promise.all([
+      const [secret, source] = await Promise.all([
         mintClientSecret(apiKey, this.mode, model),
-        navigator.mediaDevices.getUserMedia({ audio: true }),
+        acquireAudioSource(this.audioSource, () => {
+          console.warn('realtime: audio source ended', { source: this.audioSource })
+          this.callbacks.onError(`The ${this.source?.label ?? 'audio'} input ended (sharing stopped?).`)
+          this.disconnect()
+        }),
       ])
-      this.mic = mic
+      this.source = source
 
       const pc = new RTCPeerConnection()
       this.pc = pc
@@ -59,9 +65,7 @@ export class RealtimeClient {
         if (this.audioEl && e.streams[0]) this.audioEl.srcObject = e.streams[0]
       }
 
-      const track = mic.getAudioTracks()[0]
-      if (!track) throw new Error('microphone has no audio track')
-      pc.addTrack(track, mic)
+      pc.addTrack(source.track, new MediaStream([source.track]))
 
       const dc = pc.createDataChannel('oai-events')
       const handle = createEventHandler({
@@ -105,8 +109,8 @@ export class RealtimeClient {
   }
 
   disconnect(): void {
-    this.mic?.getTracks().forEach((t) => t.stop())
-    this.mic = null
+    this.source?.stop()
+    this.source = null
     if (this.audioEl) {
       this.audioEl.srcObject = null
       this.audioEl = null

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { AUDIO_SOURCE_LABELS, type AudioSourceKind } from '../lib/realtime/audio'
 import { RealtimeClient } from '../lib/realtime/client'
 import type { RealtimeMode } from '../lib/realtime/session'
 import { onToolCall } from '../tools/registry'
@@ -14,9 +15,11 @@ export type VoiceEntry = {
 type VoiceState = {
   status: VoiceStatus
   mode: RealtimeMode | null
+  /** Human label of the active audio source, for the dock header. */
+  sourceLabel: string | null
   entries: VoiceEntry[]
   error: string | null
-  connect: (mode: RealtimeMode) => Promise<void>
+  connect: (mode: RealtimeMode, audioSource?: AudioSourceKind) => Promise<void>
   disconnect: () => void
 }
 
@@ -32,17 +35,24 @@ export const useVoiceStore = create<VoiceState>((set, get) => {
   return {
     status: 'idle',
     mode: null,
+    sourceLabel: null,
     entries: [],
     error: null,
 
-    connect: async (mode) => {
+    connect: async (mode, audioSource = 'microphone') => {
       const { apiKey, realtimeModel } = useSettingsStore.getState()
       if (!apiKey) {
         set({ status: 'error', error: 'Set your OpenAI API key first.' })
         return
       }
       get().disconnect()
-      set({ mode, status: 'connecting', entries: [], error: null })
+      set({
+        mode,
+        status: 'connecting',
+        entries: [],
+        error: null,
+        sourceLabel: AUDIO_SOURCE_LABELS[audioSource],
+      })
 
       unsubscribeToolFeed = onToolCall((event) => {
         push({
@@ -53,7 +63,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => {
         })
       })
 
-      client = new RealtimeClient(mode, {
+      client = new RealtimeClient(
+        mode,
+        {
         onStatus: (status) => {
           if (status === 'live') set({ status: 'live' })
           if (status === 'closed' && get().status !== 'error' && get().status !== 'idle') {
@@ -66,11 +78,13 @@ export const useVoiceStore = create<VoiceState>((set, get) => {
           if (get().mode === 'meeting' && text.trim().toLowerCase() === 'noop') return
           push({ kind: 'assistant', text })
         },
-        onError: (message) => {
-          push({ kind: 'error', text: message })
-          set({ error: message })
+          onError: (message) => {
+            push({ kind: 'error', text: message })
+            set({ error: message })
+          },
         },
-      })
+        audioSource,
+      )
 
       try {
         await client.connect(apiKey, realtimeModel)
@@ -87,7 +101,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => {
       unsubscribeToolFeed = null
       client?.disconnect()
       client = null
-      set({ status: 'idle', mode: null })
+      set({ status: 'idle', mode: null, sourceLabel: null })
     },
   }
 })

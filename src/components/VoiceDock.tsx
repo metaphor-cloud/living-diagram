@@ -9,7 +9,7 @@ const STATUS_LABEL = {
 } as const
 
 export function VoiceDock() {
-  const { status, mode, entries, error, disconnect } = useVoiceStore()
+  const { status, mode, sourceLabel, entries, error, disconnect } = useVoiceStore()
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -23,7 +23,8 @@ export function VoiceDock() {
       <div className="voicedock__header">
         <span className={`voicedock__dot voicedock__dot--${status}`} />
         <span className="voicedock__title">
-          {mode === 'meeting' ? 'Meeting mode' : 'Voice'} · {STATUS_LABEL[status]}
+          {mode === 'meeting' ? 'Meeting mode' : 'Voice'}
+          {mode === 'meeting' && sourceLabel ? ` (${sourceLabel})` : ''} · {STATUS_LABEL[status]}
         </span>
         <button className="btn btn--small" onClick={disconnect}>
           Stop
